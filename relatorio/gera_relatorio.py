@@ -30,7 +30,12 @@ RES = os.path.join(RAIZ, "resultados")
 FIG = os.path.join(RAIZ, "relatorio", "figuras")
 SAIDA = os.path.join(RAIZ, "relatorio", "relatorio.pdf")
 
+# Fontes DejaVu: usa as do sistema (Linux) ou, se não existirem (macOS/Windows),
+# as que já vêm dentro do matplotlib.
 FD = "/usr/share/fonts/truetype/dejavu/"
+if not os.path.exists(FD + "DejaVuSerif.ttf"):
+    import matplotlib
+    FD = os.path.join(matplotlib.get_data_path(), "fonts", "ttf") + os.sep
 pdfmetrics.registerFont(TTFont("Serif", FD + "DejaVuSerif.ttf"))
 pdfmetrics.registerFont(TTFont("Serif-B", FD + "DejaVuSerif-Bold.ttf"))
 pdfmetrics.registerFont(TTFont("Serif-I", FD + "DejaVuSerif-Italic.ttf"))
@@ -111,6 +116,23 @@ def v1(met, n, col): return float(e1[(e1.metodo == met) & (e1.n == n)][col].iloc
 def v2(met, m, col): return float(e2[(e2.metodo == met) & (e2.m == m)][col].iloc[0])
 def vb(alg, n, col): return float(rb[(rb.algoritmo == alg) & (rb.n == n)][col].iloc[0])
 
+
+def memoria_gb():
+    """RAM da máquina em GB (macOS via sysctl; Linux via sysconf)."""
+    try:
+        import subprocess
+        b = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL).strip())
+        return round(b / 1024 ** 3)
+    except Exception:
+        try:
+            return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3)
+        except Exception:
+            return None
+
+
+RAM = memoria_gb()
+AMBIENTE = ("MacBook Air com processador Apple M2" + (f", {RAM} GB de RAM" if RAM else "") +
+            ", macOS 15.6.1, Apple Clang 16.0.0")
 
 NMAX = int(e1.n.max())
 NMIN = int(e1.n.min())
@@ -273,10 +295,13 @@ eq("T(0) = <i>c</i><sub>0</sub>;   T(<i>k</i>) = T(<i>k</i> − 1) + <i>c</i>  �
 p("O número de comparações é exatamente o mesmo da versão iterativa (melhor 1, pior <i>n</i>, média (<i>n</i>+1)/2).")
 p("<b>Espaço.</b> Cada chamada empilha um quadro de ativação que só é liberado quando a busca termina. No pior "
   "caso há <i>n</i> + 1 quadros simultâneos: S(<i>n</i>) = (<i>n</i> + 1)·<i>s</i> = Θ(<i>n</i>), em que <i>s</i> é o "
-  "tamanho do quadro. No binário gerado (GCC 13, -O2, x86-64) cada quadro ocupa <b>48 bytes</b> (cinco registradores "
-  "salvos + endereço de retorno). Com a pilha padrão de 8 MiB do Linux, o limite teórico é "
-  "8 388 608 / 48 ≈ <b>174 762</b> chamadas; experimentalmente, a busca funcionou com 174 000 elementos e "
-  "terminou com <i>segmentation fault</i> com 176 000. Esse é o efeito prático do espaço Θ(<i>n</i>): a versão "
+  "tamanho do quadro. Em um binário gerado com GCC 13 (-O2, x86-64, Linux), cada quadro ocupa <b>48 bytes</b> "
+  "(cinco registradores salvos + endereço de retorno); com a pilha padrão de 8 MiB, o limite teórico é "
+  "8 388 608 / 48 ≈ <b>174 762</b> chamadas, e a busca funcionou com 174 000 elementos e terminou com "
+  "<i>segmentation fault</i> com 176 000. No MacBook (Apple M2, Clang) o efeito foi reproduzido limitando a "
+  "pilha a 1 MiB (<font name='Mono'>ulimit -s 1024</font>): com <i>n</i> = 50 000, a busca sequencial recursiva "
+  "terminou com <i>segmentation fault</i>, enquanto a Solução 2 recursiva (17 quadros) executou normalmente. "
+  "Esse é o efeito prático do espaço Θ(<i>n</i>): a versão "
   "recursiva não é apenas mais lenta, ela tem um limite de tamanho que a iterativa não tem (no Windows, "
   "com 1 MB de pilha, o limite cai para a ordem de 20 mil elementos; por isso o Makefile aumenta a pilha).")
 h2("5.3 Custo do programa completo (Solução 1)")
@@ -395,8 +420,8 @@ p("Abaixo de algumas dezenas de registros novos, a busca sequencial deve ser mai
 # ================================================================== 8. EXPERIMENTOS
 h1("8. Resultados experimentais")
 h2("8.1 Metodologia")
-p("Ambiente: Intel Xeon 2,1 GHz (1 núcleo), 3,9 GB de RAM, Ubuntu 24.04, GCC 13.3 com "
-  "<font name='Mono'>-std=c11 -O2</font>. Os tempos foram medidos com relógio monotônico "
+p(f"Ambiente: {AMBIENTE}, com "
+  "<font name='Mono'>-std=c11 -O2</font> (o programa usa um único núcleo). Os tempos foram medidos com relógio monotônico "
   "(<font name='Mono'>clock_gettime</font>) dentro do programa, separando leitura dos arquivos, ordenação, buscas e "
   "gravação; cada ponto é a <b>mediana de 5 execuções</b>, com a opção <font name='Mono'>-s</font> (sem gravar) para que "
   "todas as execuções usem o mesmo destino. Também foram registrados o número de comparações e a profundidade "
@@ -423,6 +448,19 @@ tab(linhas, [2.6 * cm] + [1.85 * cm] * 6 + [1.8 * cm], pequeno=True, legenda=
 s_it, s_rec = v1("seq-iter", NMAX, "t_verificacao"), v1("seq-rec", NMAX, "t_verificacao")
 b_min = min(v1(m, NMAX, "t_verificacao") for m in BIN)
 b_max = max(v1(m, NMAX, "t_verificacao") for m in BIN)
+def compara_com_1(x):
+    return "abaixo de 1" if x < 0.95 else ("acima de 1" if x > 1.05 else "próxima de 1")
+
+
+incl_bin_min = min(inclinacao(m) for m in BIN)
+incl_bin_max = max(inclinacao(m) for m in BIN)
+if incl_bin_max < 0.95:
+    frase_incl_bin = ("ficou abaixo de 1 porque, com <i>n</i> pequeno, pesam as parcelas que não dependem de "
+                      "<i>n</i> (ordenar o lote de 1 000 chaves e as buscas)")
+else:
+    frase_incl_bin = f"ficou {compara_com_1((incl_bin_min + incl_bin_max) / 2)}"
+
+
 def incl_ord(met, n0=5000):
     a, b = v1(met, n0, "t_ordenacao"), v1(met, NMAX, "t_ordenacao")
     return math.log(b / a) / math.log(NMAX / n0)
@@ -430,11 +468,10 @@ def incl_ord(met, n0=5000):
 
 p(f"Com <i>m</i> fixo, a teoria prevê para a Solução 1 tempo linear em <i>n</i> (Θ(<i>m·n</i>)), e a inclinação medida "
   f"foi {fmt(inclinacao('seq-iter'), 2)} (iterativa) e {fmt(inclinacao('seq-rec'), 2)} (recursiva) — praticamente 1. "
-  f"Na Solução 2 a inclinação do tempo total ficou abaixo de 1 "
-  f"({fmt(min(inclinacao(m) for m in BIN), 2)} a {fmt(max(inclinacao(m) for m in BIN), 2)}) porque, com <i>n</i> pequeno, "
-  "pesam as parcelas que não dependem de <i>n</i> (ordenar o lote de 1 000 chaves e as buscas). Isolando apenas a "
+  f"Na Solução 2 a inclinação do tempo total ({fmt(incl_bin_min, 2)} a {fmt(incl_bin_max, 2)}) {frase_incl_bin}. "
+  "Isolando apenas a "
   "ordenação, que é o termo dominante Θ(<i>n</i> log <i>n</i>), a inclinação entre <i>n</i> = 5 000 e 50 000 foi "
-  f"{fmt(min(incl_ord(m) for m in BIN), 2)} a {fmt(max(incl_ord(m) for m in BIN), 2)}, próxima de 1 e "
+  f"{fmt(min(incl_ord(m) for m in BIN), 2)} a {fmt(max(incl_ord(m) for m in BIN), 2)}, "
   f"compatível com <i>n</i> log <i>n</i> (a previsão teórica nessa faixa é "
   f"{fmt(math.log((NMAX*math.log2(NMAX))/(5000*math.log2(5000)))/math.log(NMAX/5000), 2)}). "
   f"Em <i>n</i> = {fmt(NMAX)}, a Solução 2 levou {ms(b_min)}–{ms(b_max)} ms, contra {ms(s_it)} ms da busca sequencial "
@@ -452,7 +489,9 @@ p(f"A Figura 2 mostra um fato prático importante: na Solução 2 a leitura dos 
   f"(≈ {ms(v1('bin-iter-iter', NMAX, 't_carga'))} ms para {fmt(NMAX)} linhas, ≈ 34 MB) custa cerca de "
   f"{fmt(v1('bin-iter-iter', NMAX, 't_carga') / v1('bin-iter-iter', NMAX, 't_verificacao'), 0)} vezes mais do que "
   "ordenar e buscar. A leitura é Θ(<i>n</i>·tamanho da linha) e é inevitável; depois da ordenação, o gargalo "
-  "deixa de ser o algoritmo. Na Solução 1, ao contrário, a verificação já supera a leitura com <i>m</i> = 1 000.")
+  f"deixa de ser o algoritmo. Na Solução 1, a verificação levou {ms(v1('seq-iter', NMAX, 't_verificacao'))} ms "
+  f"(iterativa) e {ms(v1('seq-rec', NMAX, 't_verificacao'))} ms (recursiva), contra "
+  f"{ms(v1('bin-iter-iter', NMAX, 't_verificacao'))} ms da Solução 2.")
 
 h2("8.3 Experimento 2 — ponto de equilíbrio em função de m")
 fig("fig3_exp2_cruzamento.png", 16 * cm,
@@ -482,15 +521,30 @@ ft_s = lambda m: v2("seq-iter", m, "t_verificacao")
 ft_b = lambda m: min(v2(b, m, "t_verificacao") for b in BIN)
 c_a, c_b, c_x = cruzamento(fc_s, fc_b)
 t_a, t_b, t_x = cruzamento(ft_s, ft_b)
-m_tempo = round(t_x, -1)
+m_tempo = round(t_x, -1) if t_x is not None else None
+if c_x is not None:
+    frase_comp = (f"Em comparações, as curvas se cruzam entre <i>m</i> = {c_a} e <i>m</i> = {c_b} (interpolando, "
+                  f"<i>m</i> ≈ {fmt(c_x)}) — em acordo com a estimativa teórica <i>m</i>* ≈ 19 da seção 7. ")
+else:
+    frase_comp = "Em comparações, não houve cruzamento na faixa medida. "
+if t_x is None:
+    frase_tempo = "Em tempo, não houve cruzamento na faixa de <i>m</i> medida. "
+elif c_x is not None and t_x > c_x * 1.2:
+    frase_tempo = (f"Em tempo, o cruzamento ocorre mais tarde, entre <i>m</i> = {t_a} e {t_b} (≈ {fmt(t_x)}): a "
+                   "comparação na busca sequencial é mais barata que a do MergeSort, porque percorre a memória em "
+                   "ordem (bom uso de cache e de pré-busca do processador), enquanto a intercalação também move "
+                   "2<i>n</i> itens por nível. ")
+elif c_x is not None and t_x < c_x / 1.2:
+    frase_tempo = (f"Em tempo, o cruzamento ocorre mais cedo, entre <i>m</i> = {t_a} e {t_b} (≈ {fmt(t_x)}): nesta "
+                   "máquina, cada comparação da busca sequencial saiu relativamente mais cara que as operações do "
+                   "MergeSort. ")
+else:
+    frase_tempo = (f"Em tempo, o cruzamento ocorre praticamente no mesmo ponto, entre <i>m</i> = {t_a} e {t_b} "
+                   f"(≈ {fmt(t_x)}). ")
 p(f"A curva da Solução 1 cresce linearmente com <i>m</i>, enquanto a da Solução 2 é praticamente plana: o custo "
   f"está quase todo na ordenação do destino (≈ {fmt(v2('bin-iter-iter', 1, 'comp_ordenacao'))} comparações), e cada "
-  f"registro novo acrescenta só ≈ lg 50 000 ≈ 16 comparações. Em comparações, as curvas se cruzam entre "
-  f"<i>m</i> = {c_a} e <i>m</i> = {c_b} (interpolando, <i>m</i> ≈ {fmt(c_x)}) — em acordo com a estimativa teórica "
-  f"<i>m</i>* ≈ 19 da seção 7. Em tempo, o cruzamento ocorre "
-  f"mais tarde, entre <i>m</i> = {t_a} e {t_b} (≈ {fmt(t_x)}): a comparação na busca sequencial é mais barata que a do MergeSort, "
-  "porque percorre a memória em ordem (bom uso de cache e de pré-busca do processador), enquanto a intercalação "
-  "também move 2<i>n</i> itens por nível. A análise assintótica prevê corretamente o formato das curvas e a ordem de "
+  f"registro novo acrescenta só ≈ lg 50 000 ≈ 16 comparações. " + frase_comp + frase_tempo +
+  "A análise assintótica prevê corretamente o formato das curvas e a ordem de "
   "grandeza do cruzamento; a posição exata depende das constantes escondidas no Θ.")
 
 h2("8.4 Experimento 3 — MergeSort iterativo × recursivo")
@@ -509,10 +563,14 @@ p("As comparações do MergeSort recursivo ficaram sempre abaixo do pior caso ex
   f"{fmt(100 * ((rm.comparacoes_mergesort_rec - rm.medio_aprox) / rm.medio_aprox).abs().max(), 1)}%). "
   "O bottom-up faz um pouco mais de comparações quando <i>n</i> não é potência de 2 (em alguns tamanhos chega "
   "a ultrapassar a fórmula do top-down, que não se aplica a ele), pelas intercalações desbalanceadas descritas na "
-  "seção 6.2. O tempo dividido por <i>n</i> lg <i>n</i> fica aproximadamente constante (Figura 4, direita) — a leve "
-  "subida para <i>n</i> grande reflete o vetor deixar de caber na cache, e não uma mudança de ordem de "
-  f"complexidade. A versão recursiva foi em média {fmt(rm.razao_tempo_rec_iter.mean(), 2)}× mais lenta que a "
-  "iterativa: mesma complexidade, mas com o custo de ~2<i>n</i> chamadas de função.")
+  "seção 6.2. O tempo dividido por <i>n</i> lg <i>n</i> fica aproximadamente constante (Figura 4, direita); "
+  "variações para <i>n</i> grande refletem efeitos de cache (o vetor deixa de caber nela), e não uma mudança de "
+  "ordem de complexidade. " + (
+      f"A versão recursiva foi em média {fmt(rm.razao_tempo_rec_iter.mean(), 2)}× mais lenta que a iterativa: "
+      "mesma complexidade, mas com o custo de ~2<i>n</i> chamadas de função."
+      if rm.razao_tempo_rec_iter.mean() > 1.02 else
+      f"As duas versões tiveram tempos muito próximos (razão média recursiva/iterativa de "
+      f"{fmt(rm.razao_tempo_rec_iter.mean(), 2)}), o que é coerente com a mesma complexidade Θ(<i>n</i> log <i>n</i>)."))
 
 h2("8.5 Experimento 3 — buscas e espaço de pilha")
 fig("fig5_exp3_buscas.png", 16 * cm, "Figura 5 – Tempo e comparações por consulta (1000 consultas, metade presentes).")
@@ -541,13 +599,13 @@ p("As comparações por consulta confirmam a teoria: a busca sequencial cresce l
   f"{fmt(vb('seq_iter', 200000, 'us_por_consulta') / vb('bin_iter', 200000, 'us_por_consulta'), 0)} vezes menos. "
   f"A recursão custou caro na busca sequencial ({fmt(seq_ratio.min(), 1)}× a {fmt(seq_ratio.max(), 1)}× mais lenta que a "
   "iterativa), porque há uma chamada de função — com empilhamento de registradores — para cada elemento examinado; "
-  f"na binária a diferença foi pequena ({fmt(bin_ratio.min(), 2)}× a {fmt(bin_ratio.max(), 2)}×), pois são só ~20 chamadas.")
+  f"na binária a razão ficou entre {fmt(bin_ratio.min(), 2)}× e {fmt(bin_ratio.max(), 2)}×, pois são só ~20 chamadas.")
 fig("fig6_profundidade.png", 12.5 * cm, "Figura 6 – Profundidade máxima de pilha medida × previsão teórica.")
 p("A profundidade de pilha medida coincidiu exatamente com a teoria em todos os tamanhos: <i>n</i> + 1 na busca "
   "sequencial recursiva, ⌈lg <i>n</i>⌉ + 1 no MergeSort recursivo e ⌊lg <i>n</i>⌋ + 2 na busca binária recursiva "
   "(por exemplo, 200 001, 19 e 19 para <i>n</i> = 200 000; nos experimentos 1 e 2, a busca sequencial recursiva "
   "chegou a <i>n</i> + <i>A</i> + 1, incluindo as chaves aceitas do lote). A busca sequencial recursiva com "
-  "<i>n</i> = 200 000 só pôde ser executada com a pilha ampliada (<font name='Mono'>ulimit -s unlimited</font>); com a pilha "
+  "<i>n</i> = 200 000 só pôde ser executada com a pilha ampliada (no macOS, <font name='Mono'>ulimit -s hard</font>, 64 MiB); com a pilha "
   "padrão ela falha, como previsto na seção 5.2. Essa é a confirmação experimental de que o espaço Θ(<i>n</i>) "
   "da recursão linear é um problema real, enquanto o Θ(log <i>n</i>) das recursões da Solução 2 é inofensivo.")
 
@@ -556,17 +614,22 @@ h1("9. Conclusões")
 item("<b>Correção.</b> Os seis métodos produzem arquivos idênticos e nunca introduzem chaves repetidas no destino, "
      "inclusive quando a repetição está dentro do próprio arquivo de novos — caso que precisa ser tratado "
      "explicitamente.")
-item("<b>Teoria × prática.</b> As contagens de comparações ficaram a cerca de 1% dos modelos teóricos, as "
+item(f"<b>Teoria × prática.</b> As contagens de comparações da Solução 1 ficaram a no máximo "
+     f"{fmt(cs.erro_pct.abs().max(), 1)}% do modelo teórico, as "
      "profundidades de pilha coincidiram exatamente com as fórmulas, e as inclinações log-log dos tempos "
      "confirmaram o crescimento linear da Solução 1 (com <i>m</i> fixo) e Θ(<i>n</i> log <i>n</i>) da ordenação.")
 item(f"<b>Solução 1 × Solução 2.</b> A Solução 2 é assintoticamente superior — Θ((<i>n</i> + <i>m</i>) log(<i>n</i> + <i>m</i>)) "
      f"contra Θ(<i>m·n</i>) — e foi cerca de {fmt(s_it / ((b_max + b_min) / 2), 0)}× mais rápida com <i>n</i> = 50 000 e "
-     f"<i>m</i> = 1 000. Porém ela tem um custo fixo de ordenação: para poucos registros novos (menos de ~{fmt(m_tempo)} com "
-     "<i>n</i> = 50 000), a busca sequencial é mais rápida. A notação assintótica indica qual solução escala; as "
+     f"<i>m</i> = 1 000. Porém ela tem um custo fixo de ordenação: para poucos registros novos"
+     + (f" (menos de ~{fmt(m_tempo)} com <i>n</i> = 50 000)" if m_tempo else "") +
+     ", a busca sequencial é mais rápida. A notação assintótica indica qual solução escala; as "
      "constantes decidem qual vence em entradas pequenas.")
-item("<b>Iterativo × recursivo.</b> Em todos os pares a complexidade de tempo é a mesma e a versão iterativa foi "
-     "mais rápida. No espaço, a diferença importa quando a recursão é linear: a busca sequencial recursiva é "
-     "limitada pelo tamanho da pilha (≈ 175 mil elementos em 8 MiB), enquanto MergeSort e busca binária "
+todas_iter_mais_rapidas = (rm.razao_tempo_rec_iter.mean() > 1 and seq_ratio.mean() > 1 and bin_ratio.mean() > 1)
+item("<b>Iterativo × recursivo.</b> Em todos os pares a complexidade de tempo é a mesma"
+     + (" e a versão iterativa foi mais rápida." if todas_iter_mais_rapidas else
+        "; a versão iterativa foi mais rápida na maioria dos casos, com destaque para a busca sequencial.") +
+     " No espaço, a diferença importa quando a recursão é linear: a busca sequencial recursiva é "
+     "limitada pelo tamanho da pilha (≈ 175 mil elementos com a pilha padrão de 8 MiB no Linux x86-64), enquanto MergeSort e busca binária "
      "recursivos usam poucas dezenas de quadros mesmo com um milhão de chaves.")
 item("<b>Gargalo real.</b> Com a Solução 2, o tempo total passa a ser dominado pela leitura dos arquivos. Se as "
      "inserções forem frequentes, vale manter o índice de chaves já ordenado entre execuções (evitando reordenar "
@@ -579,7 +642,7 @@ item("<b>Qualidade da base.</b> A coluna candidata natural a chave (NumeroRegist
 h1("10. Repositório e instruções")
 p(f"Código-fonte, arquivos de teste, resultados brutos e scripts: <b>{REPOSITORIO}</b>. Compilação e execução:")
 cod("""
-make                                   # compila bin/insere e as ferramentas (GCC, C11)
+make                                   # compila bin/insere e as ferramentas (GCC ou Clang, C11)
 ./bin/insere <novos.csv> <destino.csv> [-m metodo] [-k coluna] [-v] [-s] [-t]
 #   metodo: seq-iter | seq-rec | bin-iter-iter | bin-iter-rec | bin-rec-iter | bin-rec-rec
 make base                              # converte o CSV do Inmetro e recria dados/base_andadores.csv

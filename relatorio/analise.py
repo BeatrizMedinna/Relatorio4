@@ -193,7 +193,7 @@ def main():
     d = bs[bs.algoritmo == "bin_rec"]
     ax.plot(d.n, d.profundidade_max, "v--", color="tab:cyan", label="busca binária recursiva (⌊log₂ n⌋ + 2)")
     ax.axhline(174762, color="k", lw=0.8, ls=":")
-    ax.text(1100, 200000, "limite da pilha de 8 MiB (48 B/chamada) ≈ 174 762", fontsize=8)
+    ax.text(1100, 200000, "limite de 8 MiB com 48 B/chamada (Linux x86-64) ≈ 174 762", fontsize=8)
     ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("n"); ax.set_ylabel("profundidade máxima da pilha")
     ax.set_title("Espaço de pilha medido (Exp. 3)"); ax.legend(fontsize=8)
     fig.savefig(os.path.join(FIG, "fig6_profundidade.png")); plt.close(fig)
@@ -203,3 +203,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

@@ -10,7 +10,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 REPS=${1:-5}
-ulimit -s unlimited 2>/dev/null || ulimit -s 1048576 2>/dev/null || true
+# Linux aceita "unlimited"; no macOS o máximo é o limite "hard" (64 MB)
+ulimit -s unlimited 2>/dev/null || ulimit -s hard 2>/dev/null || true
 
 BASE=dados/andadores_utf8.csv
 DIR=dados/experimentos
